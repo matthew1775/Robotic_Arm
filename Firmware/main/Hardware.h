@@ -2,7 +2,7 @@
 #ifndef HARDWARE_H
 #define HARDWARE_H
 
-#include "States/HardwareState.h"
+#include "States.h"
 
 namespace Hardware
 {
