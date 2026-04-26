@@ -7,7 +7,8 @@ constexpr uint32_t JOINT_2_ID   = 0x02;  // Docelowe ID dla Joint 2
 constexpr uint32_t MINI_SERVO_ID = 10;   // Docelowe ID 10 (0x0A) dla Mini Serw
 
 
-constexpr uint32_t JOINT_4_ID = 0x04;  // Docelowe ID dla Węzła 4
+constexpr uint32_t JOINT_4_ID = 0x04; // Docelowe ID dla Węzła 4
+constexpr uint32_t JOINT_4_CMD_ID = 0x14; 
 ST3025_Data servos_id4[4];             // Inicjalizacja globalnej tablicy na dane serw
 
 
@@ -122,6 +123,7 @@ void handleCAN() {
             CAN.endPacket();
         }
         */
+        
     }
 
     // ==========================================
@@ -150,5 +152,24 @@ void handleCAN() {
             CAN.write((const uint8_t*)&mini_pos, 4); // Pozycja z MQTT
             CAN.endPacket();
         }
+        // --- Wysyłanie do Serw ST3025 (Węzeł ID 4) ---
+        // Zakładamy, że 4 serwa z ID4 odpowiadają przegubom joint3, joint4, joint5, joint6 (indeksy 2, 3, 4, 5 w target_joints)
+        for (uint8_t i = 0; i < 4; i++) {
+            CAN.beginPacket(JOINT_4_CMD_ID);
+            
+            // Konwersja radianów z MQTT na jednostki serwa ST3025. 
+            // UWAGA: Musisz dostosować mnożnik do rozdzielczości swojego serwa (często to 4096 kroków na 360 stopni)
+            // Przykład: target_joints podaje radiany
+            float radians = target_joints[i + 3]; // Przesunięcie indeksu, np. zaczynamy od joint3
+            int16_t target_pos_steps = (int16_t)(radians * (180.0 / PI) * (4096.0 / 360.0)); 
+            
+            int16_t speed = (int16_t)target_speeds[i + 3];
+            
+            CAN.write(i); // Bajt 0: Do którego z 4 serw to trafia (0-3)
+            CAN.write((const uint8_t*)&target_pos_steps, 2); // Bajt 1-2: Pozycja
+            CAN.write((const uint8_t*)&speed, 2);            // Bajt 3-4: Prędkość
+            CAN.endPacket();
+        }
     }
+    
 }
