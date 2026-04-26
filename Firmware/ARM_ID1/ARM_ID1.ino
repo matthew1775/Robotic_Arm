@@ -1,78 +1,73 @@
 #include <Arduino.h>
-#include <Adafruit_NeoPixel.h> // <--- Biblioteka NeoPixel
+#include <Adafruit_NeoPixel.h>
 #include "Config.h"
 #include "pins.h"
 #include "Network.h"
 #include "ARM_CAN.h"
+#include "MotorControl.h"
 
-// --- Konfiguracja NeoPixel ---
-#define NUMPIXELS 1 // Liczba diod (zmień jeśli masz pasek)
+
+#define NUMPIXELS 1
 Adafruit_NeoPixel pixels(NUMPIXELS, Pins::NEOPIXEL_PIN, NEO_GRB + NEO_KHZ800);
-
 unsigned long lastMqttCmdTime = 0;
+bool lastMqttState = false;
+bool isFirstLoop = true;
 
-// Zmienna do śledzenia poprzedniego stanu MQTT (żeby nie odświeżać diody ciągle)
-bool lastMqttState = false; 
-bool isFirstLoop = true; // Zmienna upewniająca się, że odświeżymy LED po restarcie
 
 void setup() {
   Serial.begin(115200);
   Pins::init_pins();
   
-  // 1. Inicjalizacja NeoPixel i ustawienie na FIOLETOWY
+  // Ustawienie 10-bitowej rozdzielczości dla pinów PWM (zakres 0 - 1023)
+  analogWriteResolution(10); 
+
   pixels.begin();
-  pixels.setBrightness(50); // Ustawienie jasności (0-255)
+  pixels.setBrightness(50);
   pixels.setPixelColor(0, pixels.Color(128, 0, 128)); // Fioletowy
   pixels.show();
   Serial.println("[SYSTEM] Start konfiguracji...");
   
-  // 2. Inicjalizacja modułów
   initNetwork();
   initCAN();
 
-  // 3. Ustawienie koloru ŻÓŁTEGO po zakończeniu inicjalizacji
   pixels.setPixelColor(0, pixels.Color(255, 255, 0)); // Żółty
   pixels.show();
   Serial.println("[SYSTEM] Konfiguracja zakończona!");
-  
-  // Krótkie opóźnienie, abyś zdążył zauważyć żółty kolor (zanim pętla zmieni go na czerwony z powodu braku MQTT)
-  delay(1000); 
+  delay(1000);
 }
 
 void loop() {
-  handleNetwork(); // Obsługa MQTT (odbieranie/łączenie)
-  handleCAN();     // Nasłuch i cykliczne wysyłanie na CAN
+  handleNetwork(); 
+  handleCAN();
+  
+  // ---> Wywołanie naszej nowej funkcji <---
+  handleLocalMotor();
 
   // ==========================================
   // OBSŁUGA STATUSU NEOPIXEL
   // ==========================================
   bool currentMqttState = isMqttConnected();
-  
-  // Zmień kolor LED TYLKO przy zmianie stanu (lub w pierwszej pętli)
   if (currentMqttState != lastMqttState || isFirstLoop) {
       lastMqttState = currentMqttState;
       isFirstLoop = false;
       
       if (currentMqttState) {
-          pixels.setPixelColor(0, pixels.Color(0, 255, 0)); // ZIELONY - MQTT Połączone
+          pixels.setPixelColor(0, pixels.Color(0, 255, 0));
           Serial.println("[LED] Status: MQTT Połączone (Zielony)");
       } else {
-          pixels.setPixelColor(0, pixels.Color(255, 0, 0)); // CZERWONY - Brak MQTT
+          pixels.setPixelColor(0, pixels.Color(255, 0, 0));
           Serial.println("[LED] Status: MQTT Rozłączone (Czerwony)");
       }
-      pixels.show(); // Wyślij dane do diody
+      pixels.show();
   }
 
   // ==========================================
-  // WYSYŁANIE TELEMETRII CO 200ms
+  // WYSYŁANIE TELEMETRII CO 100ms
   // ==========================================
   static unsigned long lastPub = 0;
-  if (millis() - lastPub > 200) {
+  if (millis() - lastPub > 100) {
     lastPub = millis();
-    
-    // Odczyt z pinów jako przykład telemetrii
     sensA = analogRead(Pins::SENS_A_PIN) * (2.0 / 4095.0);
-    
-    sendFeedbackMessage(); // Wysyła dane na MQTT (jeśli jest podłączone)
+    sendFeedbackMessage();
   }
 }

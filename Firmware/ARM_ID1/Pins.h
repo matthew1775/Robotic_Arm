@@ -63,5 +63,10 @@ namespace Pins
         pinMode(SERVO6_PWM_PIN, OUTPUT);
         pinMode(RX_SERVO_PIN, INPUT);
         pinMode(TX_SERVO_PIN, OUTPUT);
+
+        // Konfiguracja pinów L298N jako wyjścia
+        pinMode(IN_POS_PIN, OUTPUT);
+        pinMode(IN_NEG_PIN, OUTPUT);
+        pinMode(ENABLE_PIN, OUTPUT);
     }
 }

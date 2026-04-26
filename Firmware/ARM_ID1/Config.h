@@ -27,4 +27,22 @@ extern bool can_status[7]; // ID 2 do 8
 
 extern unsigned long lastMqttCmdTime; 
 
+// ==========================================
+// DANE TELEMETRYCZNE Z WĘZŁA ID_4 (SERWA ST3025)
+// ==========================================
+struct ST3025_Data {
+    bool is_connected;
+    bool is_moving;
+    int16_t position;
+    int16_t speed;
+    int16_t load;
+    int16_t current;
+    uint8_t voltage;
+    uint8_t temperature;
+};
+
+// Tablica przechowująca stan 4 serw z węzła ID_4
+extern ST3025_Data servos_id4[4];
+
+
 #endif
