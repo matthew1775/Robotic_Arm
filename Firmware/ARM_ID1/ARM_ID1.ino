@@ -7,15 +7,22 @@
 #include "MotorControl.h"
 
 
-#define NUMPIXELS 1
+#define NUMPIXELS 8
 Adafruit_NeoPixel pixels(NUMPIXELS, Pins::NEOPIXEL_PIN, NEO_GRB + NEO_KHZ800);
 unsigned long lastMqttCmdTime = 0;
 bool lastMqttState = false;
 bool isFirstLoop = true;
 
+void setStripColor(uint32_t color) {
+    for(int i = 0; i < NUMPIXELS; i++) {
+        pixels.setPixelColor(i, color);
+    }
+    pixels.show();
+}
+
 
 void setup() {
-  Serial.begin(115200);
+  //Serial.begin(115200);
   Pins::init_pins();
   
   // Ustawienie 10-bitowej rozdzielczości dla pinów PWM (zakres 0 - 1023)
@@ -23,16 +30,16 @@ void setup() {
 
   pixels.begin();
   pixels.setBrightness(50);
-  pixels.setPixelColor(0, pixels.Color(128, 0, 128)); // Fioletowy
+  setStripColor(pixels.Color(128, 0, 128)); // Fioletowy
   pixels.show();
-  Serial.println("[SYSTEM] Start konfiguracji...");
+  //Serial.println("[SYSTEM] Start konfiguracji...");
   
   initNetwork();
   initCAN();
 
-  pixels.setPixelColor(0, pixels.Color(255, 255, 0)); // Żółty
+  setStripColor(pixels.Color(255, 255, 0)); // Żółty
   pixels.show();
-  Serial.println("[SYSTEM] Konfiguracja zakończona!");
+  //Serial.println("[SYSTEM] Konfiguracja zakończona!");
   delay(1000);
 }
 
@@ -52,14 +59,13 @@ void loop() {
       isFirstLoop = false;
       
       if (currentMqttState) {
-          pixels.setPixelColor(0, pixels.Color(0, 255, 0));
-          Serial.println("[LED] Status: MQTT Połączone (Zielony)");
+          setStripColor(pixels.Color(0, 255, 0)); // ZIELONY - Połączono
+          Serial.println("[LED] Status: MQTT Połączone (Zielony pasek)");
       } else {
-          pixels.setPixelColor(0, pixels.Color(255, 0, 0));
-          Serial.println("[LED] Status: MQTT Rozłączone (Czerwony)");
+          setStripColor(pixels.Color(255, 0, 0)); // CZERWONY - Brak połączenia
+          Serial.println("[LED] Status: MQTT Rozłączone (Czerwony pasek)");
       }
-      pixels.show();
-  }
+       }
 
   // ==========================================
   // WYSYŁANIE TELEMETRII CO 100ms

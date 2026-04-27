@@ -8,12 +8,12 @@ TOPIC_FEEDBACK = "Robotic_arm_enc"
 
 # --- LIMITY STOPNI SWOBODY (Min, Max) w stopniach ---
 AXIS_LIMITS = [
-    (-90.0, 90.0),    # 1. Obrotnica
-    (-60.0, 60.0),    # 2. Bark
-    (-10.0, 110.0),   # 3. Łokieć
-    (-10.0, 90.0),    # 4. Nadgarstek
-    (-360.0, 360.0),  # 5. Oś 5 (Przegub)
-    (-20.0, 20.0),    # 6. Wysuw
+    (0.0, 90.0),    # 1. Obrotnica
+    (0.0, 60.0),    # 2. Bark
+    (0.0, 110.0),   # 3. Łokieć
+    (0.0, 360.0),    # 4. Nadgarstek
+    (0.0, 360.0),  # 5. Oś 5 (Przegub)
+    (0.0, 20.0),    # 6. Wysuw
     (0.0, 360.0),     # 7. Rotacja końcówki (modulo 360)
     (0.0, 60.0)       # 8. Szczęki
 ]

@@ -21,7 +21,7 @@ void callback(char* topic, byte* payload, unsigned int length) {
   DeserializationError error = deserializeJson(doc, payload, length);
 
   if (error) {
-    Serial.print("[MQTT] JSON Error: "); Serial.println(error.c_str());
+    //Serial.print("[MQTT] JSON Error: "); Serial.println(error.c_str());
     return;
   }
 
@@ -49,12 +49,12 @@ void callback(char* topic, byte* payload, unsigned int length) {
     }
 
     fan_state = doc["cmd"]["fan"] | false;
-    Serial.println("[MQTT] Command Received & Parsed");
+    //Serial.println("[MQTT] Command Received & Parsed");
   }
 }
 
 void initNetwork() {
-  Serial.println("Init Ethernet...");
+  //Serial.println("Init Ethernet...");
   
   // Zaktualizowane piny z przestrzeni nazw Pins::
   pinMode(Pins::WIZ_RST_PIN, OUTPUT);

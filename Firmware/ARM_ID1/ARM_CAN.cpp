@@ -9,7 +9,11 @@ constexpr uint32_t MINI_SERVO_ID = 10;   // Docelowe ID 10 (0x0A) dla Mini Serw
 
 constexpr uint32_t JOINT_4_ID = 0x04; // Docelowe ID dla Węzła 4
 constexpr uint32_t JOINT_4_CMD_ID = 0x14; 
-ST3025_Data servos_id4[4];             // Inicjalizacja globalnej tablicy na dane serw
+ST3025_Data servos_id4[4];  
+
+// Zmienne do kontroli czasu wypisywania na Serial
+unsigned long lastSerialPrint = 0;
+const unsigned long SERIAL_PRINT_INTERVAL = 1000;           // Inicjalizacja globalnej tablicy na dane serw
 
 
 // Zmienna do wysyłania cyklicznego
@@ -17,16 +21,36 @@ unsigned long lastCanSend = 0;
 const unsigned long CAN_SEND_INTERVAL = 50; // Wysyłanie co 50ms (20 Hz)
 
 void initCAN() {
-    Serial.println("[CAN] Inicjalizacja Węzła CAN ID_1 ...");
+    //Serial.println("[CAN] Inicjalizacja Węzła CAN ID_1 ...");
     
     CAN.setPins(Pins::RX_CAN_PIN, Pins::TX_CAN_PIN);
     
     if (!CAN.begin(CAN_BAUDRATE)) {
-        Serial.println("[CAN] BŁĄD: Inicjalizacja CAN nie powiodła się!");
+        //Serial.println("[CAN] BŁĄD: Inicjalizacja CAN nie powiodła się!");
     } else {
-        Serial.println("[CAN] Uruchomiony pomyślnie na 500kbps.");
+        //Serial.println("[CAN] Uruchomiony pomyślnie na 500kbps.");
     }
 }
+
+void printID4Telemetry() {
+    //Serial.println("\n--- TELEMETRIA ID 4 (ST3025) ---");
+    for(int i = 0; i < 4; i++) {
+        if(servos_id4[i].is_connected) {
+            //Serial.printf("Servo [%d] | Temp: %d C | Volt: %.1f V | Load: %d | Pos: %d\n", 
+                          i + 1, 
+                          servos_id4[i].temperature, 
+                          servos_id4[i].voltage / 10.0, // Przeliczenie decywoltów na wolty
+                          servos_id4[i].load,
+                          servos_id4[i].position;
+        } 
+        //else {
+            //Serial.printf("Servo [%d] | ROZŁĄCZONE\n", i + 1);
+        //}
+    }
+    //Serial.println("--------------------------------");
+}
+
+
 
 void handleCAN() {
     // ==========================================
@@ -97,7 +121,6 @@ void handleCAN() {
                 }
             }
         }
-
         /*// Przykładowa funkcja na ESP32 (Węzeł ID 4) ładująca dane i wysyłająca je na CAN
         void sendST3025Telemetry(uint8_t servoIndex, bool connected, bool move, int16_t pos, int16_t speed, int16_t load, int16_t current, uint8_t volt, uint8_t temp) {
             
