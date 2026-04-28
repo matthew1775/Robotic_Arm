@@ -1,171 +1,148 @@
 #include "ARM_CAN.h"
 
+// ==========================================
 // Ustawienia sprzętowe i protokołu
+// ==========================================
 constexpr long CAN_BAUDRATE     = 500E3; // 500 kbps
-constexpr uint32_t MY_NODE_ID   = 0x01;  // Nasze ID_1
-constexpr uint32_t JOINT_2_ID   = 0x02;  // Docelowe ID dla Joint 2
-constexpr uint32_t MINI_SERVO_ID = 10;   // Docelowe ID 10 (0x0A) dla Mini Serw
+constexpr uint32_t MY_NODE_ID   = 0x01;  // ID Głównego ESP32
 
-unsigned long lastCanCmdTx = 0;
-constexpr uint32_t JOINT_4_ID = 0x04; // Docelowe ID dla Węzła 4
-constexpr uint32_t JOINT_4_CMD_ID = 0x14; 
+constexpr uint32_t JOINT_2_ID   = 0x02;  // Docelowe ID dla Joint 2
+constexpr uint32_t JOINT_3_ID   = 0x03;  // Docelowe ID dla Joint 3 (Dodane do karuzeli)
+constexpr uint32_t JOINT_4_ID   = 0x04;  // Telemetria z ID 4
+constexpr uint32_t JOINT_4_CMD_ID = 0x14; // Komendy ruchu dla ID 4
+constexpr uint32_t MINI_SERVO_ID = 10;   // Docelowe ID 10 dla Mini Serw
+
 ST3025_Data servos_id4[4];  
 
-// Zmienne do kontroli czasu wypisywania na Serial
-unsigned long lastSerialPrint = 0;
-const unsigned long SERIAL_PRINT_INTERVAL = 1000;           // Inicjalizacja globalnej tablicy na dane serw
-
-
-// Zmienna do wysyłania cyklicznego
-unsigned long lastCanSend = 0;
-const unsigned long CAN_SEND_INTERVAL = 50; // Wysyłanie co 50ms (20 Hz)
-
 void initCAN() {
-    //Serial.println("[CAN] Inicjalizacja Węzła CAN ID_1 ...");
-    
     CAN.setPins(Pins::RX_CAN_PIN, Pins::TX_CAN_PIN);
-    
-    if (!CAN.begin(CAN_BAUDRATE)) {
-        //Serial.println("[CAN] BŁĄD: Inicjalizacja CAN nie powiodła się!");
-    } else {
-        //Serial.println("[CAN] Uruchomiony pomyślnie na 500kbps.");
-    }
+    CAN.begin(CAN_BAUDRATE);
 }
-
-
 
 void handleCAN() {
     // ==========================================
-    // 1. ODBIÓR DANYCH Z CAN (Nasłuchiwanie)
+    // 1. ODBIÓR DANYCH Z CAN (Błyskawiczny nasłuch)
+    // ZMIANA: Używamy 'while' zamiast 'if'. Dzięki temu jeśli przyjdą 
+    // np. 2 ramki na raz, procesor ściągnie obie zanim ruszy dalej.
     // ==========================================
-    int packetSize = CAN.parsePacket();
-    if (packetSize) {
+    while (int packetSize = CAN.parsePacket()) {
         uint32_t receivedId = CAN.packetId();
         
         // --- Odbiór enkodera z Joint 2 (ID 2) ---
-        // Oczekujemy minimum 4 bajtów z pozycją float
         if (receivedId == JOINT_2_ID && packetSize >= 4) {
             float enc_pos = 0.0f;
-            uint8_t buffer[8] = {0};
-            for (int i = 0; i < packetSize && i < 8; i++) {
-                buffer[i] = CAN.read();
-            }
-            
-            // Konwersja bajtów na float
+            uint8_t buffer[4];
+            for (int i = 0; i < 4; i++) buffer[i] = CAN.read();
             memcpy(&enc_pos, &buffer[0], 4);
-            enc_joints[1] = enc_pos; // Zapis do tablicy enc_joints (indeks 1 to Joint 2)
-            
-            // Aktualizacja statusu CAN dla ID 2 (indeks 0 w can_status)
+            enc_joints[1] = enc_pos; 
             can_status[0] = true; 
         }
-        
+        // --- Odbiór enkodera z Joint 3 (ID 3) ---
+        else if (receivedId == JOINT_3_ID && packetSize >= 4) {
+            float enc_pos = 0.0f;
+            uint8_t buffer[4];
+            for (int i = 0; i < 4; i++) buffer[i] = CAN.read();
+            memcpy(&enc_pos, &buffer[0], 4);
+            enc_joints[2] = enc_pos; 
+            can_status[1] = true; 
+        }
         // --- Odbiór enkoderów z Mini Serw (ID 10) ---
-        // Oczekujemy: [1 bajt indeks (0-4)] + [4 bajty pozycja float]
         else if (receivedId == MINI_SERVO_ID && packetSize >= 5) {
-            uint8_t servo_idx = CAN.read(); // Odczyt pierwszego bajtu (indeksu)
-            
+            uint8_t servo_idx = CAN.read(); 
             if (servo_idx < 5) {
                 float enc_pos = 0.0f;
-                uint8_t buffer[4] = {0};
+                uint8_t buffer[4];
                 for (int i = 0; i < 4; i++) buffer[i] = CAN.read();
-                
                 memcpy(&enc_pos, buffer, 4);
-                enc_mini_joints[servo_idx] = enc_pos; // Aktualizacja konkretnego mini serwa
+                enc_mini_joints[servo_idx] = enc_pos; 
             }
         }
-        // --- Odbiór telemetrii z ID 4 (Serwa ST3025) ---
-        // --- Obsługa danych telemetrii z ID 4 ---
-        else if (receivedId == JOINT_4_ID && packetSize == 5) { // Oczekujemy dokładnie 5 bajtów
-            uint8_t servo_idx = CAN.read(); // Bajt 0: Indeks serwa (0-3)
-
+        // --- Odbiór telemetrii z ID 4 (Ping-Pong z ST3025) ---
+        else if (receivedId == JOINT_4_ID && packetSize == 5) { 
+            uint8_t servo_idx = CAN.read(); 
             if (servo_idx < 4) {
-                // can_status indeks 2 odpowiada za ID 4 (oznaczenie, że żyje)
                 can_status[2] = true; 
                 servos_id4[servo_idx].is_connected = true; 
                 
                 uint8_t buf[4];
-                for (int i = 0; i < 4; i++) buf[i] = CAN.read(); // Pobranie 4 bajtów danych
-
-                // Zapisanie Pozycji i Prędkości do globalnej tablicy
+                for (int i = 0; i < 4; i++) buf[i] = CAN.read(); 
                 memcpy(&servos_id4[servo_idx].position, &buf[0], 2);
                 memcpy(&servos_id4[servo_idx].speed,    &buf[2], 2);
             }
         }
-        /*// Przykładowa funkcja na ESP32 (Węzeł ID 4) ładująca dane i wysyłająca je na CAN
-        void sendST3025Telemetry(uint8_t servoIndex, bool connected, bool move, int16_t pos, int16_t speed, int16_t load, int16_t current, uint8_t volt, uint8_t temp) {
-            
-            // Budowanie Ramki A
-            CAN.beginPacket(0x04);
-            CAN.write(servoIndex);   // Bajt 0: Numer serwa
-            CAN.write(0);            // Bajt 1: Typ = Ramka A
-            CAN.write(connected);    // Bajt 2
-            CAN.write(move);         // Bajt 3
-            CAN.write((const uint8_t*)&pos, 2);   // Bajt 4-5
-            CAN.write((const uint8_t*)&speed, 2); // Bajt 6-7
-            CAN.endPacket();
-            // Krótka przerwa zabezpieczająca przed przepełnieniem buforów CAN
-            delay(1); 
-            // Budowanie Ramki B
-            CAN.beginPacket(0x04);
-            CAN.write(servoIndex);   // Bajt 0: Numer serwa
-            CAN.write(1);            // Bajt 1: Typ = Ramka B
-            CAN.write((const uint8_t*)&load, 2);    // Bajt 2-3
-            CAN.write((const uint8_t*)&current, 2); // Bajt 4-5
-            CAN.write(volt);         // Bajt 6
-            CAN.write(temp);         // Bajt 7
-            CAN.endPacket();
-        }
-        */
-        
     }
 
     // ==========================================
-    // 2. CYKLICZNE WYSYŁANIE DANYCH (Co 50ms)
+    // 2. NADAWANIE SEKWENCYJNE (KARUZELA MASTER-SLAVE)
+    // Procesor ID 1 co 3 milisekundy strzela kolejną ramką
+    // do kolejnego serwa, upewniając się, że kabel CAN jest pusty.
     // ==========================================
-    unsigned long currentMillis = millis();
-    if (currentMillis - lastCanSend >= CAN_SEND_INTERVAL) {
-        lastCanSend = currentMillis;
+    static unsigned long last_poll_time = 0;
+    static uint8_t poll_step = 0;
 
-        // --- Wysyłanie do Joint 2 (ID 2) ---
-        // Budowa ramki 8-bajtowej: [4 bajty cel (rad)] + [4 bajty prędkość]
-        CAN.beginPacket(JOINT_2_ID);
-        float j2_pos = target_joints[1];   // target_joints[1] to Joint 2
-        float j2_speed = target_speeds[1]; // target_speeds[1] to Joint 2 speed
-        CAN.write((const uint8_t*)&j2_pos, 4);
-        CAN.write((const uint8_t*)&j2_speed, 4);
-        CAN.endPacket();
+    if (millis() - last_poll_time >= 3) {
+        last_poll_time = millis();
 
-        // --- Wysyłanie do Mini Serw (ID 10) ---
-        // Wysyłamy 5 małych ramek, każda dla innego serwa mini
-        for (uint8_t i = 0; i < 5; i++) {
-            CAN.beginPacket(MINI_SERVO_ID);
-            float mini_pos = target_mini_joints[i];
-            
-            CAN.write(i); // Pierwszy bajt: do którego serwa to trafia (0-4)
-            CAN.write((const uint8_t*)&mini_pos, 4); // Pozycja z MQTT
-            CAN.endPacket();
+        switch(poll_step) {
+            case 0: { 
+                // Krok 0: Wyślij komendę do Joint 2
+                CAN.beginPacket(JOINT_2_ID);
+                float j2_pos = target_joints[1];   
+                float j2_speed = target_speeds[1]; 
+                CAN.write((const uint8_t*)&j2_pos, 4);
+                CAN.write((const uint8_t*)&j2_speed, 4);
+                CAN.endPacket();
+                break;
+            }
+            case 1: { 
+                // Krok 1: Wyślij komendę do Joint 3
+                CAN.beginPacket(JOINT_3_ID);
+                float j3_pos = target_joints[2];   
+                float j3_speed = target_speeds[2]; 
+                CAN.write((const uint8_t*)&j3_pos, 4);
+                CAN.write((const uint8_t*)&j3_speed, 4);
+                CAN.endPacket();
+                break;
+            }
+            case 2:
+            case 3:
+            case 4:
+            case 5:
+            case 6: { 
+                // Kroki 2 do 6: Wyślij komendy do 5 Mini Serw 
+                uint8_t mini_idx = poll_step - 2; 
+                CAN.beginPacket(MINI_SERVO_ID);
+                float mini_pos = target_mini_joints[mini_idx];
+                CAN.write(mini_idx); 
+                CAN.write((const uint8_t*)&mini_pos, 4); 
+                CAN.endPacket();
+                break;
+            }
+            case 7:
+            case 8:
+            case 9:
+            case 10: { 
+                // Kroki 7 do 10: Wyślij komendy do Serw ID 4 
+                uint8_t id4_idx = poll_step - 7; 
+                CAN.beginPacket(JOINT_4_CMD_ID); 
+                
+                // Odpowiednie mapowanie osi (joint4 -> idx 3, joint7 -> idx 6)
+                float radians = target_joints[id4_idx + 3]; 
+                int16_t target_pos_steps = (int16_t)(radians * (180.0 / PI) * (4096.0 / 360.0)); 
+                int16_t speed = (int16_t)target_speeds[id4_idx + 3];
+                
+                CAN.write(id4_idx); 
+                CAN.write((const uint8_t*)&target_pos_steps, 2); 
+                CAN.write((const uint8_t*)&speed, 2);            
+                CAN.endPacket();
+                break;
+            }
         }
-        // --- Wysyłanie do Serw ST3025 (Węzeł ID 4) ---
-        // Zakładamy, że 4 serwa z ID4 odpowiadają przegubom joint4, joint5, joint6, joint7 (indeksy 3, 4, 5, 6 w target_joints)
-        // --- Wysyłanie do Serw ST3025 (Węzeł ID 4) ---
-        if (millis() - lastCanCmdTx >= 30) {
-        lastCanCmdTx = millis();
 
-        for (uint8_t i = 0; i < 4; i++) {
-            CAN.beginPacket(JOINT_4_ID); // Twoje ID dla komend (np. 0x14)
-            
-            // Zakładam, że target_joints to Twoja globalna tablica uzupełniana z MQTT
-            float radians = target_joints[i + 3]; 
-            int16_t target_pos_steps = (int16_t)(radians * (180.0 / PI) * (4096.0 / 360.0)); 
-            int16_t speed = (int16_t)target_speeds[i + 3];
-            
-            CAN.write(i); 
-            CAN.write((const uint8_t*)&target_pos_steps, 2); 
-            CAN.write((const uint8_t*)&speed, 2);            
-            CAN.endPacket();
-
-             // <--- DODAJ TĘ LINIJKĘ (Bardzo ważne dla stabilności sprzętowej ESP32!)
+        // Przejście do kolejnego węzła
+        poll_step++;
+        if (poll_step > 10) {
+            poll_step = 0; // Reset karuzeli na koniec cyklu
         }
     }
-    
 }
