@@ -6,7 +6,7 @@ constexpr uint32_t MY_NODE_ID   = 0x01;  // Nasze ID_1
 constexpr uint32_t JOINT_2_ID   = 0x02;  // Docelowe ID dla Joint 2
 constexpr uint32_t MINI_SERVO_ID = 10;   // Docelowe ID 10 (0x0A) dla Mini Serw
 
-
+unsigned long lastCanCmdTx = 0;
 constexpr uint32_t JOINT_4_ID = 0x04; // Docelowe ID dla Węzła 4
 constexpr uint32_t JOINT_4_CMD_ID = 0x14; 
 ST3025_Data servos_id4[4];  
@@ -30,24 +30,6 @@ void initCAN() {
     } else {
         //Serial.println("[CAN] Uruchomiony pomyślnie na 500kbps.");
     }
-}
-
-void printID4Telemetry() {
-    //Serial.println("\n--- TELEMETRIA ID 4 (ST3025) ---");
-    for(int i = 0; i < 4; i++) {
-        if(servos_id4[i].is_connected) {
-            //Serial.printf("Servo [%d] | Temp: %d C | Volt: %.1f V | Load: %d | Pos: %d\n", 
-                          i + 1, 
-                          servos_id4[i].temperature, 
-                          servos_id4[i].voltage / 10.0, // Przeliczenie decywoltów na wolty
-                          servos_id4[i].load,
-                          servos_id4[i].position;
-        } 
-        //else {
-            //Serial.printf("Servo [%d] | ROZŁĄCZONE\n", i + 1);
-        //}
-    }
-    //Serial.println("--------------------------------");
 }
 
 
@@ -92,33 +74,21 @@ void handleCAN() {
             }
         }
         // --- Odbiór telemetrii z ID 4 (Serwa ST3025) ---
-        else if (receivedId == JOINT_4_ID && packetSize == 8) {
-            uint8_t servo_idx = CAN.read(); // Bajt 0: indeks serwa (0-3)
-            uint8_t frame_part = CAN.read(); // Bajt 1: część ramki (0=A, 1=B)
-            
-            if (servo_idx < 4) {
-                // can_status indeks 2 odpowiada za ID 4 (bo 0->ID2, 1->ID3, 2->ID4)
-                can_status[2] = true; 
+        // --- Obsługa danych telemetrii z ID 4 ---
+        else if (receivedId == JOINT_4_ID && packetSize == 5) { // Oczekujemy dokładnie 5 bajtów
+            uint8_t servo_idx = CAN.read(); // Bajt 0: Indeks serwa (0-3)
 
-                // Odczytanie pozostałych 6 bajtów do bufora tymczasowego
-                uint8_t buf[6];
-                for (int i = 0; i < 6; i++) {
-                    buf[i] = CAN.read();
-                }
+            if (servo_idx < 4) {
+                // can_status indeks 2 odpowiada za ID 4 (oznaczenie, że żyje)
+                can_status[2] = true; 
+                servos_id4[servo_idx].is_connected = true; 
                 
-                // Dekodowanie na podstawie części ramki (0 lub 1)
-                if (frame_part == 0) { // Część A (Połączenie, Move, Pozycja, Prędkość)
-                    servos_id4[servo_idx].is_connected = buf[0];
-                    servos_id4[servo_idx].is_moving    = buf[1];
-                    memcpy(&servos_id4[servo_idx].position, &buf[2], 2);
-                    memcpy(&servos_id4[servo_idx].speed,    &buf[4], 2);
-                } 
-                else if (frame_part == 1) { // Część B (Load, Current, Voltage, Temperatura)
-                    memcpy(&servos_id4[servo_idx].load,    &buf[0], 2);
-                    memcpy(&servos_id4[servo_idx].current, &buf[2], 2);
-                    servos_id4[servo_idx].voltage     = buf[4];
-                    servos_id4[servo_idx].temperature = buf[5];
-                }
+                uint8_t buf[4];
+                for (int i = 0; i < 4; i++) buf[i] = CAN.read(); // Pobranie 4 bajtów danych
+
+                // Zapisanie Pozycji i Prędkości do globalnej tablicy
+                memcpy(&servos_id4[servo_idx].position, &buf[0], 2);
+                memcpy(&servos_id4[servo_idx].speed,    &buf[2], 2);
             }
         }
         /*// Przykładowa funkcja na ESP32 (Węzeł ID 4) ładująca dane i wysyłająca je na CAN
@@ -176,22 +146,25 @@ void handleCAN() {
             CAN.endPacket();
         }
         // --- Wysyłanie do Serw ST3025 (Węzeł ID 4) ---
-        // Zakładamy, że 4 serwa z ID4 odpowiadają przegubom joint3, joint4, joint5, joint6 (indeksy 2, 3, 4, 5 w target_joints)
+        // Zakładamy, że 4 serwa z ID4 odpowiadają przegubom joint4, joint5, joint6, joint7 (indeksy 3, 4, 5, 6 w target_joints)
+        // --- Wysyłanie do Serw ST3025 (Węzeł ID 4) ---
+        if (millis() - lastCanCmdTx >= 30) {
+        lastCanCmdTx = millis();
+
         for (uint8_t i = 0; i < 4; i++) {
-            CAN.beginPacket(JOINT_4_CMD_ID);
+            CAN.beginPacket(JOINT_4_ID); // Twoje ID dla komend (np. 0x14)
             
-            // Konwersja radianów z MQTT na jednostki serwa ST3025. 
-            // UWAGA: Musisz dostosować mnożnik do rozdzielczości swojego serwa (często to 4096 kroków na 360 stopni)
-            // Przykład: target_joints podaje radiany
-            float radians = target_joints[i + 3]; // Przesunięcie indeksu, np. zaczynamy od joint3
+            // Zakładam, że target_joints to Twoja globalna tablica uzupełniana z MQTT
+            float radians = target_joints[i + 3]; 
             int16_t target_pos_steps = (int16_t)(radians * (180.0 / PI) * (4096.0 / 360.0)); 
-            
             int16_t speed = (int16_t)target_speeds[i + 3];
             
-            CAN.write(i); // Bajt 0: Do którego z 4 serw to trafia (0-3)
-            CAN.write((const uint8_t*)&target_pos_steps, 2); // Bajt 1-2: Pozycja
-            CAN.write((const uint8_t*)&speed, 2);            // Bajt 3-4: Prędkość
+            CAN.write(i); 
+            CAN.write((const uint8_t*)&target_pos_steps, 2); 
+            CAN.write((const uint8_t*)&speed, 2);            
             CAN.endPacket();
+
+             // <--- DODAJ TĘ LINIJKĘ (Bardzo ważne dla stabilności sprzętowej ESP32!)
         }
     }
     
