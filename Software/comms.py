@@ -9,7 +9,7 @@ class MqttManager:
         self.state = app_state
 
     def connect(self):
-        self.state.log("--- Inicjalizacja MQTT ---")
+        self.state.log("--- MQTT Initialization ---")
         try:
             self.client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION1)
             self.client.on_connect = self._on_connect
@@ -17,12 +17,12 @@ class MqttManager:
             self.client.connect(config.BROKER_ADDRESS, config.BROKER_PORT)
             self.client.loop_start()
         except Exception as e:
-            self.state.log(f"Błąd krytyczny połączenia: {e}")
+            self.state.log(f"Critical connection error: {e}")
 
     def _on_connect(self, client, userdata, flags, rc):
         if rc == 0:
             self.state.mqtt_connected = True
-            self.state.mqtt_status_text = "MQTT: POŁĄCZONO"
+            self.state.mqtt_status_text = "MQTT: CONNECTED"
             client.subscribe(config.TOPIC_FEEDBACK)
 
     def _on_message(self, client, userdata, msg):
@@ -38,7 +38,7 @@ class MqttManager:
                     self.state.actual_joints_deg[i] = math.degrees(rad_val)
 
         except Exception as e:
-            pass
+            self.state.log(f"MQTT receive error: {e}")
 
     def send_drive_command(self):
         if self.client and self.state.mqtt_connected:
@@ -61,5 +61,5 @@ class MqttManager:
             }
             try:
                 self.client.publish(config.TOPIC_CMD, json.dumps(msg))
-            except Exception:
-                pass
+            except Exception as e:
+                self.state.log(f"Data send error: {e}")
