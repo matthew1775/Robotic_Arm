@@ -6,6 +6,7 @@ import subprocess
 import platform
 import math
 import socket
+import concurrent.futures
 import config
 
 class DashboardGUI:
@@ -41,12 +42,24 @@ class DashboardGUI:
 
     def _start_network_monitor(self):
         def monitor_loop():
-            while True:
-                # Szybkie sprawdzenie portu MQTT zamiast pingu
-                self.state.ping_broker_ok = self._check_connection("192.168.1.1", 1883)
-                self.state.ping_router_ok = self._check_connection("192.168.1.102")
-                self.state.ping_ground_ok = self._check_connection("192.168.1.101")
-                time.sleep(1.5) # Zwiększono odstęp miedzy sprawdzeniami z 1s na 1.5s
+            with concurrent.futures.ThreadPoolExecutor(max_workers=3) as executor:
+                while True:
+                    # Równoległe sprawdzenie połączeń z natychmiastową aktualizacją stanu
+                    futures_to_attr = {
+                        executor.submit(self._check_connection, "192.168.1.1", 1883): "ping_broker_ok",
+                        executor.submit(self._check_connection, "192.168.1.102"): "ping_router_ok",
+                        executor.submit(self._check_connection, "192.168.1.101"): "ping_ground_ok"
+                    }
+
+                    for future in concurrent.futures.as_completed(futures_to_attr):
+                        attr_name = futures_to_attr[future]
+                        try:
+                            result = future.result()
+                            setattr(self.state, attr_name, result)
+                        except Exception:
+                            setattr(self.state, attr_name, False)
+
+                    time.sleep(1.5) # Zwiększono odstęp miedzy sprawdzeniami z 1s na 1.5s
         threading.Thread(target=monitor_loop, daemon=True).start()
     
     def setup_ui(self):
