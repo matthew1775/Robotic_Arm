@@ -14,6 +14,8 @@ class DashboardGUI:
         self.state = app_state
         self.input_manager = input_manager
         self.mqtt_manager = mqtt_manager
+        self._last_rendered_arm_axes = None
+        self._last_rendered_tip_state = None
         self.setup_ui()
         self._start_network_monitor()
     
@@ -140,15 +142,24 @@ class DashboardGUI:
             lbl.config(fg="#00ff00" if abs(target_deg - actual_deg) < 2.0 else "orange")
             
             # NAPRAWA: Zmieniamy tylko zawartość taga "arc" (sam niebieski łuk)
-            cvs.delete("arc")
             l_min, l_max = config.AXIS_LIMITS[i]
             rng = (l_max - l_min) if l_max != l_min else 360
             angle_arc = ((actual_deg - l_min) / rng) * 360 if rng != 0 else 0
-            cvs.create_arc(10, 10, 110, 110, start=90, extent=-angle_arc, style="arc", outline="#00A2FF", width=10, tags="arc")
+            if not cvs.find_withtag("arc"):
+                cvs.create_arc(10, 10, 110, 110, start=90, extent=-angle_arc, style="arc", outline="#00A2FF", width=10, tags="arc")
+            else:
+                cvs.itemconfig("arc", extent=-angle_arc)
 
-        # Rysowanie symulacji 2D ramienia
-        self.draw_arm(self.state.target_joints_deg)
-        self.draw_scissor_tip(self.state.target_joints_deg[6], self.state.target_joints_deg[7])
+        # Rysowanie symulacji 2D ramienia (tylko gdy zmienily sie pozycje docelowe)
+        current_arm_axes = tuple(self.state.target_joints_deg[0:6])
+        if current_arm_axes != self._last_rendered_arm_axes:
+            self.draw_arm(self.state.target_joints_deg)
+            self._last_rendered_arm_axes = current_arm_axes
+
+        current_tip_state = (self.state.target_joints_deg[6], self.state.target_joints_deg[7])
+        if current_tip_state != self._last_rendered_tip_state:
+            self.draw_scissor_tip(self.state.target_joints_deg[6], self.state.target_joints_deg[7])
+            self._last_rendered_tip_state = current_tip_state
 
         # Wypisywanie logów
         while self.state.logs:
