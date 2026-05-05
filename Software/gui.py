@@ -181,23 +181,16 @@ class DashboardGUI:
 
     def draw_arm(self, axes_deg):
         c = self.canvas_arm
-        c.delete("all") # Oczyszczanie przed rysowaniem
         w, h = c.winfo_width(), c.winfo_height()
         if w < 10: return
         cx, cy = w // 2, h - 30 
         
         base_rot_val = axes_deg[0]
-        c.create_rectangle(cx-30, cy, cx+30, cy+15, fill="#333", outline="#555", width=2)
-        c.create_rectangle(cx-20, cy-5, cx+20, cy, fill="#444", outline="#555") 
         
         arrow_act = "#ff00ff"
         arrow_inact = "#555"
         col_L = arrow_act if base_rot_val < -1.0 else arrow_inact
         col_R = arrow_act if base_rot_val > 1.0 else arrow_inact
-
-        c.create_polygon([(cx-32, cy+18), (cx-42, cy+25), (cx-28, cy+28)], fill=col_L, outline=col_L)
-        c.create_polygon([(cx+32, cy+18), (cx+42, cy+25), (cx+28, cy+28)], fill=col_R, outline=col_R)
-        c.create_text(cx, cy+35, text=f"Obrót: {base_rot_val:.0f}°", fill="#888", font=("Arial", 8))
 
         L = config.LINK_LENGTHS
         scale_draw = 0.7 
@@ -218,17 +211,44 @@ class DashboardGUI:
         x4 = x3 + ((L[4] + ext)*scale_draw) * math.cos(q1 + q2 + q3)
         y4 = y3 + ((L[4] + ext)*scale_draw) * math.sin(q1 + q2 + q3)
 
-        c.create_line(x0, y0, x1, y1, width=6, fill="#888", capstyle="round")
-        c.create_line(x1, y1, x2, y2, width=6, fill="#888", capstyle="round")
-        c.create_line(x2, y2, x3, y3, width=6, fill="#888", capstyle="round")
-        c.create_line(x3, y3, x4, y4, width=4, fill="#ff6600", capstyle="round")
-        
-        for px, py in [(x1,y1), (x2,y2), (x3,y3)]:
-            c.create_oval(px-3, py-3, px+3, py+3, fill="#00ffff", outline="")
+        # Optimization: Create canvas items only once to avoid memory churn and Tcl/Tk ID incrementing.
+        # On subsequent calls, update existing items using canvas.coords() and canvas.itemconfig().
+        if not hasattr(self, '_arm_initialized') or self._last_arm_w != w or self._last_arm_h != h:
+            c.delete("all")
+            self.arm_rect1 = c.create_rectangle(cx-30, cy, cx+30, cy+15, fill="#333", outline="#555", width=2)
+            self.arm_rect2 = c.create_rectangle(cx-20, cy-5, cx+20, cy, fill="#444", outline="#555")
+            self.arm_poly_L = c.create_polygon([(cx-32, cy+18), (cx-42, cy+25), (cx-28, cy+28)], fill=col_L, outline=col_L)
+            self.arm_poly_R = c.create_polygon([(cx+32, cy+18), (cx+42, cy+25), (cx+28, cy+28)], fill=col_R, outline=col_R)
+            self.arm_text = c.create_text(cx, cy+35, text=f"Obrót: {base_rot_val:.0f}°", fill="#888", font=("Arial", 8))
+
+            self.arm_line1 = c.create_line(x0, y0, x1, y1, width=6, fill="#888", capstyle="round")
+            self.arm_line2 = c.create_line(x1, y1, x2, y2, width=6, fill="#888", capstyle="round")
+            self.arm_line3 = c.create_line(x2, y2, x3, y3, width=6, fill="#888", capstyle="round")
+            self.arm_line4 = c.create_line(x3, y3, x4, y4, width=4, fill="#ff6600", capstyle="round")
+
+            self.arm_joints = []
+            for px, py in [(x1,y1), (x2,y2), (x3,y3)]:
+                self.arm_joints.append(c.create_oval(px-3, py-3, px+3, py+3, fill="#00ffff", outline=""))
+
+            self._arm_initialized = True
+            self._last_arm_w = w
+            self._last_arm_h = h
+        else:
+            c.itemconfig(self.arm_poly_L, fill=col_L, outline=col_L)
+            c.itemconfig(self.arm_poly_R, fill=col_R, outline=col_R)
+            c.itemconfig(self.arm_text, text=f"Obrót: {base_rot_val:.0f}°")
+
+            c.coords(self.arm_line1, x0, y0, x1, y1)
+            c.coords(self.arm_line2, x1, y1, x2, y2)
+            c.coords(self.arm_line3, x2, y2, x3, y3)
+            c.coords(self.arm_line4, x3, y3, x4, y4)
+
+            c.coords(self.arm_joints[0], x1-3, y1-3, x1+3, y1+3)
+            c.coords(self.arm_joints[1], x2-3, y2-3, x2+3, y2+3)
+            c.coords(self.arm_joints[2], x3-3, y3-3, x3+3, y3+3)
 
     def draw_scissor_tip(self, rotation_deg, jaw_angle):
         c = self.canvas_tip
-        c.delete("all")
         cx, cy = 125, 125 
         visual_rot_rad = math.radians(-90)
         jaw_rad = math.radians(jaw_angle)
@@ -238,15 +258,33 @@ class DashboardGUI:
         def rotate_pt(x, y, angle):
             return x * math.cos(angle) - y * math.sin(angle) + cx, x * math.sin(angle) + y * math.cos(angle) + cy
 
-        c.create_text(cx, cy+70, text=f"Rotacja: {rotation_deg:.0f}°", fill="#888", font=("Arial", 10, "bold"))
-        c.create_oval(cx-20, cy-20, cx+20, cy+20, outline="#555", width=2)
-        c.create_line(cx, cy-20, cx, cy+20, fill="#333", width=2)
-
         angle1 = visual_rot_rad - (jaw_rad / 2.0)
         b1_pts = [(0, -3), (blade_len, -blade_width), (blade_len, 0), (0, 3)]
-        c.create_polygon([rotate_pt(px, py, angle1) for px, py in b1_pts], fill="#ccc", outline="black")
+        poly1_coords = []
+        for px, py in b1_pts:
+            rx, ry = rotate_pt(px, py, angle1)
+            poly1_coords.extend([rx, ry])
 
         angle2 = visual_rot_rad + (jaw_rad / 2.0)
         b2_pts = [(0, 3), (blade_len, blade_width), (blade_len, 0), (0, -3)]
-        c.create_polygon([rotate_pt(px, py, angle2) for px, py in b2_pts], fill="#ccc", outline="black")
-        c.create_oval(cx-4, cy-4, cx+4, cy+4, fill="#ff6600")
+        poly2_coords = []
+        for px, py in b2_pts:
+            rx, ry = rotate_pt(px, py, angle2)
+            poly2_coords.extend([rx, ry])
+
+        # Optimization: Create canvas items only once to avoid memory churn and Tcl/Tk ID incrementing.
+        # On subsequent calls, update existing items using canvas.coords() and canvas.itemconfig().
+        if not hasattr(self, '_tip_initialized'):
+            c.delete("all")
+            self.tip_text = c.create_text(cx, cy+70, text=f"Rotacja: {rotation_deg:.0f}°", fill="#888", font=("Arial", 10, "bold"))
+            self.tip_oval1 = c.create_oval(cx-20, cy-20, cx+20, cy+20, outline="#555", width=2)
+            self.tip_line1 = c.create_line(cx, cy-20, cx, cy+20, fill="#333", width=2)
+
+            self.tip_poly1 = c.create_polygon(poly1_coords, fill="#ccc", outline="black")
+            self.tip_poly2 = c.create_polygon(poly2_coords, fill="#ccc", outline="black")
+            self.tip_oval2 = c.create_oval(cx-4, cy-4, cx+4, cy+4, fill="#ff6600")
+            self._tip_initialized = True
+        else:
+            c.itemconfig(self.tip_text, text=f"Rotacja: {rotation_deg:.0f}°")
+            c.coords(self.tip_poly1, *poly1_coords)
+            c.coords(self.tip_poly2, *poly2_coords)
