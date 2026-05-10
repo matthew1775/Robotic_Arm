@@ -181,23 +181,45 @@ class DashboardGUI:
 
     def draw_arm(self, axes_deg):
         c = self.canvas_arm
-        c.delete("all") # Oczyszczanie przed rysowaniem
         w, h = c.winfo_width(), c.winfo_height()
         if w < 10: return
         cx, cy = w // 2, h - 30 
         
+        # ⚡ Bolt: Performance optimization
+        # Use existing items and update coords/props instead of deleting and recreating.
+        if not hasattr(self, '_arm_items'):
+            self._arm_items = {
+                'base_rect1': c.create_rectangle(0, 0, 0, 0, fill="#333", outline="#555", width=2),
+                'base_rect2': c.create_rectangle(0, 0, 0, 0, fill="#444", outline="#555"),
+                'poly_L': c.create_polygon([0,0, 0,0, 0,0], fill="#555", outline="#555"),
+                'poly_R': c.create_polygon([0,0, 0,0, 0,0], fill="#555", outline="#555"),
+                'text_rot': c.create_text(0, 0, text="", fill="#888", font=("Arial", 8)),
+                'line1': c.create_line(0, 0, 0, 0, width=6, fill="#888", capstyle="round"),
+                'line2': c.create_line(0, 0, 0, 0, width=6, fill="#888", capstyle="round"),
+                'line3': c.create_line(0, 0, 0, 0, width=6, fill="#888", capstyle="round"),
+                'line4': c.create_line(0, 0, 0, 0, width=4, fill="#ff6600", capstyle="round"),
+                'oval1': c.create_oval(0, 0, 0, 0, fill="#00ffff", outline=""),
+                'oval2': c.create_oval(0, 0, 0, 0, fill="#00ffff", outline=""),
+                'oval3': c.create_oval(0, 0, 0, 0, fill="#00ffff", outline="")
+            }
+
         base_rot_val = axes_deg[0]
-        c.create_rectangle(cx-30, cy, cx+30, cy+15, fill="#333", outline="#555", width=2)
-        c.create_rectangle(cx-20, cy-5, cx+20, cy, fill="#444", outline="#555") 
+        c.coords(self._arm_items['base_rect1'], cx-30, cy, cx+30, cy+15)
+        c.coords(self._arm_items['base_rect2'], cx-20, cy-5, cx+20, cy)
         
         arrow_act = "#ff00ff"
         arrow_inact = "#555"
         col_L = arrow_act if base_rot_val < -1.0 else arrow_inact
         col_R = arrow_act if base_rot_val > 1.0 else arrow_inact
 
-        c.create_polygon([(cx-32, cy+18), (cx-42, cy+25), (cx-28, cy+28)], fill=col_L, outline=col_L)
-        c.create_polygon([(cx+32, cy+18), (cx+42, cy+25), (cx+28, cy+28)], fill=col_R, outline=col_R)
-        c.create_text(cx, cy+35, text=f"Obrót: {base_rot_val:.0f}°", fill="#888", font=("Arial", 8))
+        c.coords(self._arm_items['poly_L'], cx-32, cy+18, cx-42, cy+25, cx-28, cy+28)
+        c.itemconfig(self._arm_items['poly_L'], fill=col_L, outline=col_L)
+
+        c.coords(self._arm_items['poly_R'], cx+32, cy+18, cx+42, cy+25, cx+28, cy+28)
+        c.itemconfig(self._arm_items['poly_R'], fill=col_R, outline=col_R)
+
+        c.coords(self._arm_items['text_rot'], cx, cy+35)
+        c.itemconfig(self._arm_items['text_rot'], text=f"Obrót: {base_rot_val:.0f}°")
 
         L = config.LINK_LENGTHS
         scale_draw = 0.7 
@@ -218,18 +240,37 @@ class DashboardGUI:
         x4 = x3 + ((L[4] + ext)*scale_draw) * math.cos(q1 + q2 + q3)
         y4 = y3 + ((L[4] + ext)*scale_draw) * math.sin(q1 + q2 + q3)
 
-        c.create_line(x0, y0, x1, y1, width=6, fill="#888", capstyle="round")
-        c.create_line(x1, y1, x2, y2, width=6, fill="#888", capstyle="round")
-        c.create_line(x2, y2, x3, y3, width=6, fill="#888", capstyle="round")
-        c.create_line(x3, y3, x4, y4, width=4, fill="#ff6600", capstyle="round")
+        c.coords(self._arm_items['line1'], x0, y0, x1, y1)
+        c.coords(self._arm_items['line2'], x1, y1, x2, y2)
+        c.coords(self._arm_items['line3'], x2, y2, x3, y3)
+        c.coords(self._arm_items['line4'], x3, y3, x4, y4)
         
-        for px, py in [(x1,y1), (x2,y2), (x3,y3)]:
-            c.create_oval(px-3, py-3, px+3, py+3, fill="#00ffff", outline="")
+        pts = [(x1,y1), (x2,y2), (x3,y3)]
+        c.coords(self._arm_items['oval1'], pts[0][0]-3, pts[0][1]-3, pts[0][0]+3, pts[0][1]+3)
+        c.coords(self._arm_items['oval2'], pts[1][0]-3, pts[1][1]-3, pts[1][0]+3, pts[1][1]+3)
+        c.coords(self._arm_items['oval3'], pts[2][0]-3, pts[2][1]-3, pts[2][0]+3, pts[2][1]+3)
 
     def draw_scissor_tip(self, rotation_deg, jaw_angle):
         c = self.canvas_tip
-        c.delete("all")
         cx, cy = 125, 125 
+
+        # ⚡ Bolt: Performance optimization
+        # Reuse canvas items for tip rendering to avoid expensive deletion/creation
+        if not hasattr(self, '_tip_items'):
+            self._tip_items = {
+                'text_rot': c.create_text(0, 0, text="", fill="#888", font=("Arial", 10, "bold")),
+                'base_oval': c.create_oval(0, 0, 0, 0, outline="#555", width=2),
+                'base_line': c.create_line(0, 0, 0, 0, fill="#333", width=2),
+                'blade1': c.create_polygon([0,0]*4, fill="#ccc", outline="black"),
+                'blade2': c.create_polygon([0,0]*4, fill="#ccc", outline="black"),
+                'center_dot': c.create_oval(0, 0, 0, 0, fill="#ff6600")
+            }
+
+            # Static items setup once
+            c.coords(self._tip_items['base_oval'], cx-20, cy-20, cx+20, cy+20)
+            c.coords(self._tip_items['base_line'], cx, cy-20, cx, cy+20)
+            c.coords(self._tip_items['center_dot'], cx-4, cy-4, cx+4, cy+4)
+
         visual_rot_rad = math.radians(-90)
         jaw_rad = math.radians(jaw_angle)
         blade_len = 60 
@@ -238,15 +279,15 @@ class DashboardGUI:
         def rotate_pt(x, y, angle):
             return x * math.cos(angle) - y * math.sin(angle) + cx, x * math.sin(angle) + y * math.cos(angle) + cy
 
-        c.create_text(cx, cy+70, text=f"Rotacja: {rotation_deg:.0f}°", fill="#888", font=("Arial", 10, "bold"))
-        c.create_oval(cx-20, cy-20, cx+20, cy+20, outline="#555", width=2)
-        c.create_line(cx, cy-20, cx, cy+20, fill="#333", width=2)
+        c.coords(self._tip_items['text_rot'], cx, cy+70)
+        c.itemconfig(self._tip_items['text_rot'], text=f"Rotacja: {rotation_deg:.0f}°")
 
         angle1 = visual_rot_rad - (jaw_rad / 2.0)
         b1_pts = [(0, -3), (blade_len, -blade_width), (blade_len, 0), (0, 3)]
-        c.create_polygon([rotate_pt(px, py, angle1) for px, py in b1_pts], fill="#ccc", outline="black")
+        b1_coords = [coord for px, py in b1_pts for coord in rotate_pt(px, py, angle1)]
+        c.coords(self._tip_items['blade1'], *b1_coords)
 
         angle2 = visual_rot_rad + (jaw_rad / 2.0)
         b2_pts = [(0, 3), (blade_len, blade_width), (blade_len, 0), (0, -3)]
-        c.create_polygon([rotate_pt(px, py, angle2) for px, py in b2_pts], fill="#ccc", outline="black")
-        c.create_oval(cx-4, cy-4, cx+4, cy+4, fill="#ff6600")
+        b2_coords = [coord for px, py in b2_pts for coord in rotate_pt(px, py, angle2)]
+        c.coords(self._tip_items['blade2'], *b2_coords)
