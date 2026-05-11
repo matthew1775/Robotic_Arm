@@ -1,3 +1,3 @@
-## 2024-05-04 - [Tkinter Canvas Performance]
-**Learning:** Continuously calling `create_*` and `delete()` on a Tkinter canvas at high frame rates (like 20fps) causes the internal Tcl/Tk item ID counter to increment infinitely, causing unnecessary memory churn and processing overhead. Even if visually identical, it is a significant anti-pattern.
-**Action:** Always prefer `canvas.itemconfig(item_tag, ...)` to update properties of existing drawn items instead of deleting and recreating them. Additionally, memoize state to avoid executing expensive redraw operations entirely when input states haven't changed.
+## 2024-05-24 - [Memoize Tkinter Updates in High-Frequency Loops]
+**Learning:** In Tkinter GUI applications running high-frequency loops (e.g., 20 FPS in `Software/gui.py`), repeatedly updating canvas items or label configurations (like text and color) when the underlying data hasn't changed is a major performance bottleneck. Tkinter performs expensive redraw operations even if the new values are identical to the old ones.
+**Action:** Always memoize the UI application state (like target and actual joint degrees). Cache the last rendered values and check if the current state differs before calling `config()` or `itemconfig()`. This conditionally skips expensive redraws and significantly reduces CPU usage and main thread blocking.

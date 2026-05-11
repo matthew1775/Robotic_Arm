@@ -17,6 +17,7 @@ class DashboardGUI:
         self.mqtt_manager = mqtt_manager
         self._last_rendered_arm_axes = None
         self._last_rendered_tip_state = None
+        self._last_rendered_joints_state = [(None, None)] * 8
         self.setup_ui()
         self._start_network_monitor()
     
@@ -151,6 +152,12 @@ class DashboardGUI:
             target_deg = self.state.target_joints_deg[i]
             actual_deg = self.state.actual_joints_deg[i]
             
+            current_state = (target_deg, actual_deg)
+            if current_state == self._last_rendered_joints_state[i]:
+                continue
+
+            self._last_rendered_joints_state[i] = current_state
+
             lbl.config(text=f"T: {target_deg:.1f}°\nA: {actual_deg:.1f}°")
             lbl.config(fg="#00ff00" if abs(target_deg - actual_deg) < 2.0 else "orange")
             
