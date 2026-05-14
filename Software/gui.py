@@ -18,6 +18,13 @@ class DashboardGUI:
         self._last_rendered_arm_axes = None
         self._last_rendered_tip_state = None
         self.setup_ui()
+        self._last_mqtt_status_text = None
+        self._last_ping_ground_ok = None
+        self._last_ping_router_ok = None
+        self._last_ping_broker_ok = None
+        self._last_joint_labels = [(None, None)] * 8
+        self._arm_initialized = False
+        self._tip_initialized = False
         self._start_network_monitor()
     
     def _check_connection(self, host, port=None):
@@ -140,10 +147,21 @@ class DashboardGUI:
 
     def update_interface(self):
         # Aktualizacja statusów LED
-        self.lbl_mqtt_status.config(text=self.state.mqtt_status_text)
-        self.led_canvas.itemconfig(self.led_ground, fill="#00ff00" if self.state.ping_ground_ok else "#444")
-        self.led_canvas.itemconfig(self.led_router, fill="#00ff00" if self.state.ping_router_ok else "#444")
-        self.led_canvas.itemconfig(self.led_broker, fill="#00ff00" if self.state.ping_broker_ok else "#444")
+        if self._last_mqtt_status_text != self.state.mqtt_status_text:
+            self.lbl_mqtt_status.config(text=self.state.mqtt_status_text)
+            self._last_mqtt_status_text = self.state.mqtt_status_text
+
+        if self._last_ping_ground_ok != self.state.ping_ground_ok:
+            self.led_canvas.itemconfig(self.led_ground, fill="#00ff00" if self.state.ping_ground_ok else "#444")
+            self._last_ping_ground_ok = self.state.ping_ground_ok
+
+        if self._last_ping_router_ok != self.state.ping_router_ok:
+            self.led_canvas.itemconfig(self.led_router, fill="#00ff00" if self.state.ping_router_ok else "#444")
+            self._last_ping_router_ok = self.state.ping_router_ok
+
+        if self._last_ping_broker_ok != self.state.ping_broker_ok:
+            self.led_canvas.itemconfig(self.led_broker, fill="#00ff00" if self.state.ping_broker_ok else "#444")
+            self._last_ping_broker_ok = self.state.ping_broker_ok
 
         # Rysowanie 8 kwadratów
         for i in range(8):
@@ -151,8 +169,17 @@ class DashboardGUI:
             target_deg = self.state.target_joints_deg[i]
             actual_deg = self.state.actual_joints_deg[i]
             
-            lbl.config(text=f"T: {target_deg:.1f}°\nA: {actual_deg:.1f}°")
-            lbl.config(fg="#00ff00" if abs(target_deg - actual_deg) < 2.0 else "orange")
+            new_text = f"T: {target_deg:.1f}°\nA: {actual_deg:.1f}°"
+            new_color = "#00ff00" if abs(target_deg - actual_deg) < 2.0 else "orange"
+
+            last_text, last_color = self._last_joint_labels[i]
+
+            if new_text != last_text:
+                lbl.config(text=new_text)
+            if new_color != last_color:
+                lbl.config(fg=new_color)
+
+            self._last_joint_labels[i] = (new_text, new_color)
             
             # NAPRAWA: Zmieniamy tylko zawartość taga "arc" (sam niebieski łuk)
             l_min, l_max = config.AXIS_LIMITS[i]
@@ -181,23 +208,43 @@ class DashboardGUI:
 
     def draw_arm(self, axes_deg):
         c = self.canvas_arm
-        c.delete("all") # Oczyszczanie przed rysowaniem
         w, h = c.winfo_width(), c.winfo_height()
         if w < 10: return
         cx, cy = w // 2, h - 30 
         
-        base_rot_val = axes_deg[0]
-        c.create_rectangle(cx-30, cy, cx+30, cy+15, fill="#333", outline="#555", width=2)
-        c.create_rectangle(cx-20, cy-5, cx+20, cy, fill="#444", outline="#555") 
+        if not self._arm_initialized:
+            c.create_rectangle(cx-30, cy, cx+30, cy+15, fill="#333", outline="#555", width=2, tags="base_rect1")
+            c.create_rectangle(cx-20, cy-5, cx+20, cy, fill="#444", outline="#555", tags="base_rect2")
+            c.create_polygon(0, 0, 0, 0, 0, 0, fill="#555", outline="#555", tags="arrow_l")
+            c.create_polygon(0, 0, 0, 0, 0, 0, fill="#555", outline="#555", tags="arrow_r")
+            c.create_text(cx, cy+35, text="Obrót: 0°", fill="#888", font=("Arial", 8), tags="rot_text")
+
+            c.create_line(0, 0, 0, 0, width=6, fill="#888", capstyle="round", tags="link1")
+            c.create_line(0, 0, 0, 0, width=6, fill="#888", capstyle="round", tags="link2")
+            c.create_line(0, 0, 0, 0, width=6, fill="#888", capstyle="round", tags="link3")
+            c.create_line(0, 0, 0, 0, width=4, fill="#ff6600", capstyle="round", tags="link4")
+
+            for i in range(3):
+                c.create_oval(0, 0, 0, 0, fill="#00ffff", outline="", tags=f"joint_{i}")
+            self._arm_initialized = True
+
+        # Aktualizacja elementów
+        c.coords("base_rect1", cx-30, cy, cx+30, cy+15)
+        c.coords("base_rect2", cx-20, cy-5, cx+20, cy)
         
+        base_rot_val = axes_deg[0]
         arrow_act = "#ff00ff"
         arrow_inact = "#555"
         col_L = arrow_act if base_rot_val < -1.0 else arrow_inact
         col_R = arrow_act if base_rot_val > 1.0 else arrow_inact
 
-        c.create_polygon([(cx-32, cy+18), (cx-42, cy+25), (cx-28, cy+28)], fill=col_L, outline=col_L)
-        c.create_polygon([(cx+32, cy+18), (cx+42, cy+25), (cx+28, cy+28)], fill=col_R, outline=col_R)
-        c.create_text(cx, cy+35, text=f"Obrót: {base_rot_val:.0f}°", fill="#888", font=("Arial", 8))
+        c.coords("arrow_l", cx-32, cy+18, cx-42, cy+25, cx-28, cy+28)
+        c.itemconfig("arrow_l", fill=col_L, outline=col_L)
+        c.coords("arrow_r", cx+32, cy+18, cx+42, cy+25, cx+28, cy+28)
+        c.itemconfig("arrow_r", fill=col_R, outline=col_R)
+
+        c.coords("rot_text", cx, cy+35)
+        c.itemconfig("rot_text", text=f"Obrót: {base_rot_val:.0f}°")
 
         L = config.LINK_LENGTHS
         scale_draw = 0.7 
@@ -218,18 +265,30 @@ class DashboardGUI:
         x4 = x3 + ((L[4] + ext)*scale_draw) * math.cos(q1 + q2 + q3)
         y4 = y3 + ((L[4] + ext)*scale_draw) * math.sin(q1 + q2 + q3)
 
-        c.create_line(x0, y0, x1, y1, width=6, fill="#888", capstyle="round")
-        c.create_line(x1, y1, x2, y2, width=6, fill="#888", capstyle="round")
-        c.create_line(x2, y2, x3, y3, width=6, fill="#888", capstyle="round")
-        c.create_line(x3, y3, x4, y4, width=4, fill="#ff6600", capstyle="round")
+        c.coords("link1", x0, y0, x1, y1)
+        c.coords("link2", x1, y1, x2, y2)
+        c.coords("link3", x2, y2, x3, y3)
+        c.coords("link4", x3, y3, x4, y4)
         
-        for px, py in [(x1,y1), (x2,y2), (x3,y3)]:
-            c.create_oval(px-3, py-3, px+3, py+3, fill="#00ffff", outline="")
+        pts = [(x1,y1), (x2,y2), (x3,y3)]
+        for i, (px, py) in enumerate(pts):
+            c.coords(f"joint_{i}", px-3, py-3, px+3, py+3)
 
     def draw_scissor_tip(self, rotation_deg, jaw_angle):
         c = self.canvas_tip
-        c.delete("all")
         cx, cy = 125, 125 
+
+        if not self._tip_initialized:
+            c.create_text(cx, cy+70, text="Rotacja: 0°", fill="#888", font=("Arial", 10, "bold"), tags="tip_rot_text")
+            c.create_oval(cx-20, cy-20, cx+20, cy+20, outline="#555", width=2, tags="tip_base_oval")
+            c.create_line(cx, cy-20, cx, cy+20, fill="#333", width=2, tags="tip_base_line")
+            c.create_polygon(0, 0, 0, 0, 0, 0, 0, 0, fill="#ccc", outline="black", tags="blade1")
+            c.create_polygon(0, 0, 0, 0, 0, 0, 0, 0, fill="#ccc", outline="black", tags="blade2")
+            c.create_oval(cx-4, cy-4, cx+4, cy+4, fill="#ff6600", tags="tip_center")
+            self._tip_initialized = True
+
+        c.itemconfig("tip_rot_text", text=f"Rotacja: {rotation_deg:.0f}°")
+
         visual_rot_rad = math.radians(-90)
         jaw_rad = math.radians(jaw_angle)
         blade_len = 60 
@@ -238,15 +297,12 @@ class DashboardGUI:
         def rotate_pt(x, y, angle):
             return x * math.cos(angle) - y * math.sin(angle) + cx, x * math.sin(angle) + y * math.cos(angle) + cy
 
-        c.create_text(cx, cy+70, text=f"Rotacja: {rotation_deg:.0f}°", fill="#888", font=("Arial", 10, "bold"))
-        c.create_oval(cx-20, cy-20, cx+20, cy+20, outline="#555", width=2)
-        c.create_line(cx, cy-20, cx, cy+20, fill="#333", width=2)
-
         angle1 = visual_rot_rad - (jaw_rad / 2.0)
         b1_pts = [(0, -3), (blade_len, -blade_width), (blade_len, 0), (0, 3)]
-        c.create_polygon([rotate_pt(px, py, angle1) for px, py in b1_pts], fill="#ccc", outline="black")
+        b1_coords = [coord for px, py in b1_pts for coord in rotate_pt(px, py, angle1)]
+        c.coords("blade1", *b1_coords)
 
         angle2 = visual_rot_rad + (jaw_rad / 2.0)
         b2_pts = [(0, 3), (blade_len, blade_width), (blade_len, 0), (0, -3)]
-        c.create_polygon([rotate_pt(px, py, angle2) for px, py in b2_pts], fill="#ccc", outline="black")
-        c.create_oval(cx-4, cy-4, cx+4, cy+4, fill="#ff6600")
+        b2_coords = [coord for px, py in b2_pts for coord in rotate_pt(px, py, angle2)]
+        c.coords("blade2", *b2_coords)
