@@ -17,6 +17,11 @@ class DashboardGUI:
         self.mqtt_manager = mqtt_manager
         self._last_rendered_arm_axes = None
         self._last_rendered_tip_state = None
+
+        self._last_mqtt_status_text = None
+        self._last_ping_status = (None, None, None)
+        self._last_rendered_joints = [(None, None)] * 8
+
         self.setup_ui()
         self._start_network_monitor()
     
@@ -140,10 +145,18 @@ class DashboardGUI:
 
     def update_interface(self):
         # Aktualizacja statusów LED
-        self.lbl_mqtt_status.config(text=self.state.mqtt_status_text)
-        self.led_canvas.itemconfig(self.led_ground, fill="#00ff00" if self.state.ping_ground_ok else "#444")
-        self.led_canvas.itemconfig(self.led_router, fill="#00ff00" if self.state.ping_router_ok else "#444")
-        self.led_canvas.itemconfig(self.led_broker, fill="#00ff00" if self.state.ping_broker_ok else "#444")
+        # BOLT OPTIMIZATION: Memoize string to skip expensive Tkinter text redraws if unchanged
+        if self.state.mqtt_status_text != self._last_mqtt_status_text:
+            self.lbl_mqtt_status.config(text=self.state.mqtt_status_text)
+            self._last_mqtt_status_text = self.state.mqtt_status_text
+
+        # BOLT OPTIMIZATION: Tuple check to skip redrawing 3 canvas shapes per 50ms tick
+        current_ping_status = (self.state.ping_ground_ok, self.state.ping_router_ok, self.state.ping_broker_ok)
+        if current_ping_status != self._last_ping_status:
+            self.led_canvas.itemconfig(self.led_ground, fill="#00ff00" if self.state.ping_ground_ok else "#444")
+            self.led_canvas.itemconfig(self.led_router, fill="#00ff00" if self.state.ping_router_ok else "#444")
+            self.led_canvas.itemconfig(self.led_broker, fill="#00ff00" if self.state.ping_broker_ok else "#444")
+            self._last_ping_status = current_ping_status
 
         # Rysowanie 8 kwadratów
         for i in range(8):
@@ -151,17 +164,21 @@ class DashboardGUI:
             target_deg = self.state.target_joints_deg[i]
             actual_deg = self.state.actual_joints_deg[i]
             
-            lbl.config(text=f"T: {target_deg:.1f}°\nA: {actual_deg:.1f}°")
-            lbl.config(fg="#00ff00" if abs(target_deg - actual_deg) < 2.0 else "orange")
-            
-            # NAPRAWA: Zmieniamy tylko zawartość taga "arc" (sam niebieski łuk)
-            l_min, l_max = config.AXIS_LIMITS[i]
-            rng = (l_max - l_min) if l_max != l_min else 360
-            angle_arc = ((actual_deg - l_min) / rng) * 360 if rng != 0 else 0
-            if not cvs.find_withtag("arc"):
-                cvs.create_arc(10, 10, 110, 110, start=90, extent=-angle_arc, style="arc", outline="#00A2FF", width=10, tags="arc")
-            else:
-                cvs.itemconfig("arc", extent=-angle_arc)
+            # BOLT OPTIMIZATION: Memoize target/actual tuple to prevent resetting label text and regenerating blue arcs
+            if (target_deg, actual_deg) != self._last_rendered_joints[i]:
+                lbl.config(text=f"T: {target_deg:.1f}°\nA: {actual_deg:.1f}°")
+                lbl.config(fg="#00ff00" if abs(target_deg - actual_deg) < 2.0 else "orange")
+
+                # NAPRAWA: Zmieniamy tylko zawartość taga "arc" (sam niebieski łuk)
+                l_min, l_max = config.AXIS_LIMITS[i]
+                rng = (l_max - l_min) if l_max != l_min else 360
+                angle_arc = ((actual_deg - l_min) / rng) * 360 if rng != 0 else 0
+                if not cvs.find_withtag("arc"):
+                    cvs.create_arc(10, 10, 110, 110, start=90, extent=-angle_arc, style="arc", outline="#00A2FF", width=10, tags="arc")
+                else:
+                    cvs.itemconfig("arc", extent=-angle_arc)
+
+                self._last_rendered_joints[i] = (target_deg, actual_deg)
 
         # Rysowanie symulacji 2D ramienia (tylko gdy zmienily sie pozycje docelowe)
         current_arm_axes = tuple(self.state.target_joints_deg[0:6])
