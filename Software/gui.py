@@ -100,6 +100,7 @@ class DashboardGUI:
         self.grid_frame = tk.Frame(self.main_frame, bg=config.BG_COLOR)
         self.grid_frame.pack(side="top", fill="x")
         self.joint_widgets = []
+        self._last_lbl_states = [None] * 8
         names = ["1. Obrotnica", "2. Bark", "3. Łokieć", "4. Nadgarstek", "5. Oś 5 (LB/RB)", "6. Wysuw", "7. Rotacja Końc.", "8. Szczęki"]
         for i in range(8):
             frame = tk.LabelFrame(self.grid_frame, text=names[i], bg=config.BG_COLOR, fg="white", font=("Arial", 10, "bold"))
@@ -133,6 +134,41 @@ class DashboardGUI:
         self.console = scrolledtext.ScrolledText(bottom_frame, bg="#222", fg="#00ff00", width=40, font=("Consolas", 9))
         self.console.pack(side="right", fill="y", padx=(5, 0))
 
+        self._init_arm_canvas_items()
+        self._init_tip_canvas_items()
+
+    def _init_arm_canvas_items(self):
+        c = self.canvas_arm
+        self.arm_items = {}
+        # Base elements
+        self.arm_items['base_rect1'] = c.create_rectangle(0, 0, 0, 0, fill="#333", outline="#555", width=2)
+        self.arm_items['base_rect2'] = c.create_rectangle(0, 0, 0, 0, fill="#444", outline="#555")
+        self.arm_items['poly_L'] = c.create_polygon([0,0,0,0,0,0], fill="#555", outline="#555")
+        self.arm_items['poly_R'] = c.create_polygon([0,0,0,0,0,0], fill="#555", outline="#555")
+        self.arm_items['text_rot'] = c.create_text(0, 0, text="", fill="#888", font=("Arial", 8))
+
+        # Lines
+        self.arm_items['line1'] = c.create_line(0, 0, 0, 0, width=6, fill="#888", capstyle="round")
+        self.arm_items['line2'] = c.create_line(0, 0, 0, 0, width=6, fill="#888", capstyle="round")
+        self.arm_items['line3'] = c.create_line(0, 0, 0, 0, width=6, fill="#888", capstyle="round")
+        self.arm_items['line4'] = c.create_line(0, 0, 0, 0, width=4, fill="#ff6600", capstyle="round")
+
+        # Joints
+        self.arm_items['joint1'] = c.create_oval(0, 0, 0, 0, fill="#00ffff", outline="")
+        self.arm_items['joint2'] = c.create_oval(0, 0, 0, 0, fill="#00ffff", outline="")
+        self.arm_items['joint3'] = c.create_oval(0, 0, 0, 0, fill="#00ffff", outline="")
+
+    def _init_tip_canvas_items(self):
+        c = self.canvas_tip
+        self.tip_items = {}
+        cx, cy = 125, 125
+        self.tip_items['text_rot'] = c.create_text(cx, cy+70, text="", fill="#888", font=("Arial", 10, "bold"))
+        self.tip_items['base_oval'] = c.create_oval(cx-20, cy-20, cx+20, cy+20, outline="#555", width=2)
+        self.tip_items['base_line'] = c.create_line(cx, cy-20, cx, cy+20, fill="#333", width=2)
+        self.tip_items['blade1'] = c.create_polygon([0,0,0,0,0,0], fill="#ccc", outline="black")
+        self.tip_items['blade2'] = c.create_polygon([0,0,0,0,0,0], fill="#ccc", outline="black")
+        self.tip_items['center_dot'] = c.create_oval(cx-4, cy-4, cx+4, cy+4, fill="#ff6600")
+
     def refresh_joysticks(self):
         joysticks = self.input_manager.scan_joysticks()
         if not joysticks: self.lbl_joy.config(text="Joystick: Brak", fg="yellow")
@@ -151,8 +187,15 @@ class DashboardGUI:
             target_deg = self.state.target_joints_deg[i]
             actual_deg = self.state.actual_joints_deg[i]
             
-            lbl.config(text=f"T: {target_deg:.1f}°\nA: {actual_deg:.1f}°")
-            lbl.config(fg="#00ff00" if abs(target_deg - actual_deg) < 2.0 else "orange")
+            new_text = f"T: {target_deg:.1f}°\nA: {actual_deg:.1f}°"
+            new_color = "#00ff00" if abs(target_deg - actual_deg) < 2.0 else "orange"
+            new_state = (new_text, new_color)
+
+            # OPTIMIZATION: Memoize label states to avoid expensive Tkinter redraws.
+            # We skip lbl.config() completely if the text and color haven't changed.
+            if self._last_lbl_states[i] != new_state:
+                lbl.config(text=new_text, fg=new_color)
+                self._last_lbl_states[i] = new_state
             
             # NAPRAWA: Zmieniamy tylko zawartość taga "arc" (sam niebieski łuk)
             l_min, l_max = config.AXIS_LIMITS[i]
@@ -180,24 +223,31 @@ class DashboardGUI:
             self.console.see(tk.END)
 
     def draw_arm(self, axes_deg):
+        # OPTIMIZATION: Avoid canvas.delete("all") and recreating items.
+        # Using itemconfig and coords on pre-created elements prevents memory overhead
+        # and infinitely incrementing Tcl/Tk item IDs in the high-frequency loop.
         c = self.canvas_arm
-        c.delete("all") # Oczyszczanie przed rysowaniem
         w, h = c.winfo_width(), c.winfo_height()
         if w < 10: return
         cx, cy = w // 2, h - 30 
         
         base_rot_val = axes_deg[0]
-        c.create_rectangle(cx-30, cy, cx+30, cy+15, fill="#333", outline="#555", width=2)
-        c.create_rectangle(cx-20, cy-5, cx+20, cy, fill="#444", outline="#555") 
+        c.coords(self.arm_items['base_rect1'], cx-30, cy, cx+30, cy+15)
+        c.coords(self.arm_items['base_rect2'], cx-20, cy-5, cx+20, cy)
         
         arrow_act = "#ff00ff"
         arrow_inact = "#555"
         col_L = arrow_act if base_rot_val < -1.0 else arrow_inact
         col_R = arrow_act if base_rot_val > 1.0 else arrow_inact
 
-        c.create_polygon([(cx-32, cy+18), (cx-42, cy+25), (cx-28, cy+28)], fill=col_L, outline=col_L)
-        c.create_polygon([(cx+32, cy+18), (cx+42, cy+25), (cx+28, cy+28)], fill=col_R, outline=col_R)
-        c.create_text(cx, cy+35, text=f"Obrót: {base_rot_val:.0f}°", fill="#888", font=("Arial", 8))
+        c.coords(self.arm_items['poly_L'], cx-32, cy+18, cx-42, cy+25, cx-28, cy+28)
+        c.itemconfig(self.arm_items['poly_L'], fill=col_L, outline=col_L)
+
+        c.coords(self.arm_items['poly_R'], cx+32, cy+18, cx+42, cy+25, cx+28, cy+28)
+        c.itemconfig(self.arm_items['poly_R'], fill=col_R, outline=col_R)
+
+        c.coords(self.arm_items['text_rot'], cx, cy+35)
+        c.itemconfig(self.arm_items['text_rot'], text=f"Obrót: {base_rot_val:.0f}°")
 
         L = config.LINK_LENGTHS
         scale_draw = 0.7 
@@ -218,17 +268,19 @@ class DashboardGUI:
         x4 = x3 + ((L[4] + ext)*scale_draw) * math.cos(q1 + q2 + q3)
         y4 = y3 + ((L[4] + ext)*scale_draw) * math.sin(q1 + q2 + q3)
 
-        c.create_line(x0, y0, x1, y1, width=6, fill="#888", capstyle="round")
-        c.create_line(x1, y1, x2, y2, width=6, fill="#888", capstyle="round")
-        c.create_line(x2, y2, x3, y3, width=6, fill="#888", capstyle="round")
-        c.create_line(x3, y3, x4, y4, width=4, fill="#ff6600", capstyle="round")
+        c.coords(self.arm_items['line1'], x0, y0, x1, y1)
+        c.coords(self.arm_items['line2'], x1, y1, x2, y2)
+        c.coords(self.arm_items['line3'], x2, y2, x3, y3)
+        c.coords(self.arm_items['line4'], x3, y3, x4, y4)
         
-        for px, py in [(x1,y1), (x2,y2), (x3,y3)]:
-            c.create_oval(px-3, py-3, px+3, py+3, fill="#00ffff", outline="")
+        c.coords(self.arm_items['joint1'], x1-3, y1-3, x1+3, y1+3)
+        c.coords(self.arm_items['joint2'], x2-3, y2-3, x2+3, y2+3)
+        c.coords(self.arm_items['joint3'], x3-3, y3-3, x3+3, y3+3)
 
     def draw_scissor_tip(self, rotation_deg, jaw_angle):
+        # OPTIMIZATION: Avoid canvas.delete("all") and recreating items.
+        # Updating pre-created items using coords/itemconfig prevents memory churn.
         c = self.canvas_tip
-        c.delete("all")
         cx, cy = 125, 125 
         visual_rot_rad = math.radians(-90)
         jaw_rad = math.radians(jaw_angle)
@@ -238,15 +290,14 @@ class DashboardGUI:
         def rotate_pt(x, y, angle):
             return x * math.cos(angle) - y * math.sin(angle) + cx, x * math.sin(angle) + y * math.cos(angle) + cy
 
-        c.create_text(cx, cy+70, text=f"Rotacja: {rotation_deg:.0f}°", fill="#888", font=("Arial", 10, "bold"))
-        c.create_oval(cx-20, cy-20, cx+20, cy+20, outline="#555", width=2)
-        c.create_line(cx, cy-20, cx, cy+20, fill="#333", width=2)
+        c.itemconfig(self.tip_items['text_rot'], text=f"Rotacja: {rotation_deg:.0f}°")
 
         angle1 = visual_rot_rad - (jaw_rad / 2.0)
         b1_pts = [(0, -3), (blade_len, -blade_width), (blade_len, 0), (0, 3)]
-        c.create_polygon([rotate_pt(px, py, angle1) for px, py in b1_pts], fill="#ccc", outline="black")
+        flat_b1 = [coord for px, py in b1_pts for coord in rotate_pt(px, py, angle1)]
+        c.coords(self.tip_items['blade1'], *flat_b1)
 
         angle2 = visual_rot_rad + (jaw_rad / 2.0)
         b2_pts = [(0, 3), (blade_len, blade_width), (blade_len, 0), (0, -3)]
-        c.create_polygon([rotate_pt(px, py, angle2) for px, py in b2_pts], fill="#ccc", outline="black")
-        c.create_oval(cx-4, cy-4, cx+4, cy+4, fill="#ff6600")
+        flat_b2 = [coord for px, py in b2_pts for coord in rotate_pt(px, py, angle2)]
+        c.coords(self.tip_items['blade2'], *flat_b2)
