@@ -15,8 +15,17 @@ class DashboardGUI:
         self.state = app_state
         self.input_manager = input_manager
         self.mqtt_manager = mqtt_manager
+
+        # Memoization states for performance
         self._last_rendered_arm_axes = None
         self._last_rendered_tip_state = None
+        self._last_mqtt_status_text = None
+        self._last_ping_ground_ok = None
+        self._last_ping_router_ok = None
+        self._last_ping_broker_ok = None
+        self._last_target_joints_deg = [None] * 8
+        self._last_actual_joints_deg = [None] * 8
+
         self.setup_ui()
         self._start_network_monitor()
     
@@ -139,29 +148,45 @@ class DashboardGUI:
         else: self.lbl_joy.config(text=f"Joystick: {joysticks[0].get_name()[:20]}", fg="green")
 
     def update_interface(self):
-        # Aktualizacja statusów LED
-        self.lbl_mqtt_status.config(text=self.state.mqtt_status_text)
-        self.led_canvas.itemconfig(self.led_ground, fill="#00ff00" if self.state.ping_ground_ok else "#444")
-        self.led_canvas.itemconfig(self.led_router, fill="#00ff00" if self.state.ping_router_ok else "#444")
-        self.led_canvas.itemconfig(self.led_broker, fill="#00ff00" if self.state.ping_broker_ok else "#444")
+        # Aktualizacja statusów LED z użyciem memoizacji, aby unikać zbędnych operacji
+        if self.state.mqtt_status_text != self._last_mqtt_status_text:
+            self.lbl_mqtt_status.config(text=self.state.mqtt_status_text)
+            self._last_mqtt_status_text = self.state.mqtt_status_text
 
-        # Rysowanie 8 kwadratów
+        if self.state.ping_ground_ok != self._last_ping_ground_ok:
+            self.led_canvas.itemconfig(self.led_ground, fill="#00ff00" if self.state.ping_ground_ok else "#444")
+            self._last_ping_ground_ok = self.state.ping_ground_ok
+
+        if self.state.ping_router_ok != self._last_ping_router_ok:
+            self.led_canvas.itemconfig(self.led_router, fill="#00ff00" if self.state.ping_router_ok else "#444")
+            self._last_ping_router_ok = self.state.ping_router_ok
+
+        if self.state.ping_broker_ok != self._last_ping_broker_ok:
+            self.led_canvas.itemconfig(self.led_broker, fill="#00ff00" if self.state.ping_broker_ok else "#444")
+            self._last_ping_broker_ok = self.state.ping_broker_ok
+
+        # Rysowanie 8 kwadratów z użyciem memoizacji
         for i in range(8):
             cvs, lbl = self.joint_widgets[i]
             target_deg = self.state.target_joints_deg[i]
             actual_deg = self.state.actual_joints_deg[i]
             
-            lbl.config(text=f"T: {target_deg:.1f}°\nA: {actual_deg:.1f}°")
-            lbl.config(fg="#00ff00" if abs(target_deg - actual_deg) < 2.0 else "orange")
-            
-            # NAPRAWA: Zmieniamy tylko zawartość taga "arc" (sam niebieski łuk)
-            l_min, l_max = config.AXIS_LIMITS[i]
-            rng = (l_max - l_min) if l_max != l_min else 360
-            angle_arc = ((actual_deg - l_min) / rng) * 360 if rng != 0 else 0
-            if not cvs.find_withtag("arc"):
-                cvs.create_arc(10, 10, 110, 110, start=90, extent=-angle_arc, style="arc", outline="#00A2FF", width=10, tags="arc")
-            else:
-                cvs.itemconfig("arc", extent=-angle_arc)
+            # Aktualizuj UI tylko wtedy gdy wartości się zmieniły
+            if target_deg != self._last_target_joints_deg[i] or actual_deg != self._last_actual_joints_deg[i]:
+                lbl.config(text=f"T: {target_deg:.1f}°\nA: {actual_deg:.1f}°")
+                lbl.config(fg="#00ff00" if abs(target_deg - actual_deg) < 2.0 else "orange")
+
+                # NAPRAWA: Zmieniamy tylko zawartość taga "arc" (sam niebieski łuk)
+                l_min, l_max = config.AXIS_LIMITS[i]
+                rng = (l_max - l_min) if l_max != l_min else 360
+                angle_arc = ((actual_deg - l_min) / rng) * 360 if rng != 0 else 0
+                if not cvs.find_withtag("arc"):
+                    cvs.create_arc(10, 10, 110, 110, start=90, extent=-angle_arc, style="arc", outline="#00A2FF", width=10, tags="arc")
+                else:
+                    cvs.itemconfig("arc", extent=-angle_arc)
+
+                self._last_target_joints_deg[i] = target_deg
+                self._last_actual_joints_deg[i] = actual_deg
 
         # Rysowanie symulacji 2D ramienia (tylko gdy zmienily sie pozycje docelowe)
         current_arm_axes = tuple(self.state.target_joints_deg[0:6])
