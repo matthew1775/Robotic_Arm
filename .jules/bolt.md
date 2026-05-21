@@ -1,3 +1,3 @@
-## 2024-05-04 - [Tkinter Canvas Performance]
-**Learning:** Continuously calling `create_*` and `delete()` on a Tkinter canvas at high frame rates (like 20fps) causes the internal Tcl/Tk item ID counter to increment infinitely, causing unnecessary memory churn and processing overhead. Even if visually identical, it is a significant anti-pattern.
-**Action:** Always prefer `canvas.itemconfig(item_tag, ...)` to update properties of existing drawn items instead of deleting and recreating them. Additionally, memoize state to avoid executing expensive redraw operations entirely when input states haven't changed.
+## 2024-05-21 - Tkinter ID Incrementing Memory Leak
+**Learning:** In Tkinter, calling `c.delete("all")` and repeatedly creating new objects (`create_rectangle`, `create_polygon`) inside a high-frequency render loop (like 20Hz updates) causes the internal Tcl/Tk ID counter to increment infinitely. This leads to garbage collection overhead and a measurable memory leak over time, drastically degrading rendering performance.
+**Action:** Always use tags to conditionally create shapes only once (`if not c.find_withtag("my_tag"): c.create...`). On subsequent frames, update their coordinates using `c.coords("my_tag", ...)` and their properties using `c.itemconfig("my_tag", ...)`.
